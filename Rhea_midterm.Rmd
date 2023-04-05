@@ -4,23 +4,30 @@ author: "Ruihan Zhang"
 date: "2023-03-28"
 output: html_document
 ---
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(collapse = TRUE, echo = FALSE, message = FALSE, warning = FALSE, dpi = 300, fig.width = 7)
+```
 
-```{r setup, include=FALSE}
+
+```{r,include = FALSE, message=FALSE, warning=FALSE}
 library(tidyverse)
 library(caret)
+library(MASS)
+library(knitr)
 library(earth)
 library(mgcv)
 ```
 
-```{r}
+
+
+```{r,include = FALSE, message=FALSE, warning=FALSE}
 set.seed(2614)
 recover=load("./recovery.Rdata")
 dat = dat[sample(1:10000, 2000),] %>% 
-  select(-id)
-
+  dplyr::select(-id)
 ```
 
-```{r}
+```{r,include = FALSE, message=FALSE, warning=FALSE}
 #data partition
 train_index=createDataPartition(dat$recovery_time, p=0.7,list = FALSE)
 #training data
@@ -33,7 +40,7 @@ x2=model.matrix(recovery_time~., data=dat)[-train_index,-1]
 y2=dat$recovery_time[-train_index]
 ```
 
-```{r}
+```{r,include = FALSE, message=FALSE, warning=FALSE}
 #exploratory analysis and data visualization
 visualization = train_data %>% 
   mutate(study=case_when(
@@ -79,7 +86,7 @@ linear = train(recovery_time ~ age + gender + race + smoking + height +
 summary(linear$finalModel)
 #RMSE
 test_pred1=predict(linear,newdata = test_data)
-rmse1=sqrt(mean((test_pred-test_data$recovery_time)**2))
+rmse1=sqrt(mean((test_pred1-test_data$recovery_time)**2))
 rmse1
 ```
 
@@ -91,11 +98,14 @@ lasso=train(x1,y1,
                    tuneGrid = expand.grid(alpha = 1,
                                           lambda = exp(seq(-1, 5, length = 100))),
                    trControl = ctrl)
-summary(lasso$finalModel)
-test_pred2=predict(lasso,newdata=x2)
-rmse2=sqrt(mean((test_pred2-test_data$recovery_time)**2))
-rmse2
-
+coef(lasso$finalModel, lasso$bestTune$lambda)
+lasso$bestTunetest_pred2=predict(lasso,newdata=x2)
+pred_lasso=predict(lasso, newx = x2, s = lasso$lambda.min)
+rmse_lasso= sqrt(mean((pred_lasso-y2)**2))
+rmse_lasso
+coef=coef(lasso, s = lasso$lambda.min)
+n.pred=sum(coef[-1] != 0)  # exclude intercept
+n.pred
 ```
 
 
@@ -107,16 +117,20 @@ elastic_net=train(x1, y1,
                   tuneGrid = expand.grid(alpha = seq(0, 1, length = 21), 
                                          lambda = exp(seq(2, -2, length = 50))),
                   trControl = ctrl)
-summary(elastic_net$finalModel)
-test_pred3=predict(elastic_net, newdata = x2)
-rmse3=sqrt(mean((test_pred3 - test_data$recovery_time)**2))
-rmse3
+elastic_net$bestTune
+test_pred_elastic=predict(elastic_net, newdata = x2)
+rmse_elastic=sqrt(mean((test_pred_elastic - test_data$recovery_time)**2))
+rmse_elastic
 
 ```
 
+
+
+
+
 ```{r}
 #pls
-set.seed(2183)
+set.seed(2614)
 pls=train(x1, y1,
           method = "pls",
           tuneGrid = data.frame(ncomp = 1:15), # CHECK THIS
@@ -138,9 +152,69 @@ mars = train(x1, y1,
              method = "earth",
              tuneGrid = mars_grid,
              trControl = ctrl)
-summary(mars$finalModel)
-test_pred5=predict(mars, newdata = x2)
-rmse5=sqrt(mean((test_pred5 - test_data$recovery_time)**2))
-rmse5
+kable(mars$bestTune,"simple")
+coef(mars$finalModel)
+test_pred_mars=predict(mars, newdata = x2)
+rmse_mars=sqrt(mean((test_pred_mars - test_data$recovery_time)**2))
+rmse_mars
+```
+
+```{r}
+#gam without all predictors
+gam1=train(x1, y1, 
+         method = "gam",
+         tuneGrid = data.frame(method = "GCV.Cp", select = c(TRUE)),
+         trControl = ctrl, # 10-fold CV
+         control = gam.control(maxit = 200))
+summary(gam1$finalModel)
+gam1$df.residual
+test_pred_gam1=predict(gam1, newdata = x2)
+rmse_gam1=sqrt(mean((test_pred_gam1-test_data$recovery_time)**2))
+rmse_gam1
+```
+
+```{r}
+#gam with all predictors
+gam2 = train(x1, y1,
+                 method = "gam",
+                 trControl = ctrl,
+                 control = gam.control(maxit = 200))
+summary(gam2$finalModel)
+gam2$df.residual
+test_pred_gam2=predict(gam2, newdata = x2)
+rmse_gam2=sqrt(mean((test_pred_gam2-test_data$recovery_time)**2))
+rmse_gam2               
+```
+
+
+```{r}
+#model comparison
+set.seed(2614)
+res=resamples(list(lm = linear,lasso = lasso, elastic_net = elastic_net,pls = pls,gam1 = gam1,gam2=gam2,mars = mars))
+summary(res)
+```
+
+
+```{r}
+bwplot(res, 
+       metric = "RMSE",
+       main = "Figure 2. Model Comparison")
+```
+
+```{r}
+model_performance=gam1$results$RMSE
+model_performance
+rmse_gam1
+```
+
+```{r}
+set.seed(2614)
+final_model = gam(recovery_time ~ gender + race + + smoking + 
+                         hypertension + diabetes + vaccine + severity + study + 
+                         s(age) + s(SBP) + s(LDL) + s(bmi) + s(height) + 
+                         s(weight), 
+              data = train_data) 
+summary(final_model)
+plot(final_model)
 ```
 
